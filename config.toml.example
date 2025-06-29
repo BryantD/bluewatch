@@ -1,0 +1,37 @@
+# Bluesky credentials for authentication
+[bluesky]
+username = "your.handle"
+password = "your-password"
+
+# Storage configuration
+[storage]
+database = "bluewatch.db"  # SQLite database file for tracking scan state
+# Supports ~ home directory expansion: database = "~/bluewatch/state.db"
+
+# Scan configurations - you can define multiple scans
+# Each scan monitors a user's timeline for posts matching a regex pattern
+# When matches are found, they can trigger webhooks and/or shell commands
+
+[[scan]]
+name = "crypto_watch"
+handle = "example_user"
+pattern = "bitcoin|crypto|ethereum"  # Case-insensitive regex pattern
+webhook_url = "https://your-webhook.com/endpoint"
+limit = 10  # Number of recent posts to scan
+
+[[scan]]
+name = "news_alerts"
+handle = "news_account"
+pattern = "breaking|urgent|alert"
+# Shell command with string formatting - available fields: {text}, {created_at}, {handle}, {pattern}
+shell = "notify-send 'Breaking News' '{text}'"
+limit = 20
+
+[[scan]]
+name = "combined_monitoring"
+handle = "important_user"
+pattern = "critical|emergency"
+# You can use both webhook and shell commands
+webhook_url = "https://alerts.com/webhook"
+shell = "echo '[{created_at}] {handle}: {text}' >> /var/log/alerts.log"
+limit = 15
