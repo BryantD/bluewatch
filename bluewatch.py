@@ -9,10 +9,14 @@ import re
 import requests
 import subprocess
 import sqlite3
-from datetime import datetime
+import time
+import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
-__version__ = "0.6.0"
+logger = logging.getLogger(__name__)
+
+__version__ = "1.0.0"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -101,6 +105,15 @@ def get_scan_status(db_path: str, scan_name: str = None):
     conn.close()
     return results
 
+def reset_scan_state(db_path: str, scan_name: str):
+    """Remove scan state from database entirely."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("DELETE FROM scan_state WHERE scan_name = ?", (scan_name,))
+    rows_affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return rows_affected > 0
+
 @click.group()
 @click.version_option(__version__, prog_name="bluewatch")
 def cli():
@@ -110,13 +123,21 @@ def cli():
 @cli.command()
 @click.argument("scan_name", required=False)
 @click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
-def scan(scan_name, config):
+@click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
+def scan(scan_name, config, log_level):
     """Run configured scans. If SCAN_NAME is provided, run only that scan."""
+    # Setup logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format='%(message)s'
+    )
+    
     cfg = load_config(config)
     bs_cfg = cfg.get("bluesky", {})
     username = bs_cfg.get("username")
     password = bs_cfg.get("password")
     if not username or not password:
+        logger.error("Bluesky credentials missing in config file")
         raise click.UsageError("Bluesky credentials missing in config file")
 
     # Get database path from config
@@ -126,17 +147,20 @@ def scan(scan_name, config):
 
     scans = cfg.get("scan", [])
     if not scans:
+        logger.error("No scan configurations found in config file")
         raise click.UsageError("No scan configurations found in config file")
 
     # Filter to specific scan if requested
     if scan_name:
         scans = [s for s in scans if s.get("name") == scan_name]
         if not scans:
+            logger.error(f"Scan '{scan_name}' not found in config file")
             raise click.UsageError(f"Scan '{scan_name}' not found in config file")
 
     try:
         from atproto import Client
     except ImportError:
+        logger.error("The atproto library is required. Install via `uv add atproto`.")
         raise click.ClickException("The atproto library is required. Install via `uv add atproto`.")
     
     client = Client()
@@ -148,8 +172,15 @@ def scan(scan_name, config):
 @cli.command()
 @click.argument("scan_name", required=False)
 @click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
-def status(scan_name, config):
+@click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
+def status(scan_name, config, log_level):
     """Show status of scans. If SCAN_NAME is provided, show only that scan."""
+    # Setup logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format='%(message)s'
+    )
+    
     cfg = load_config(config)
     
     # Get database path from config
@@ -164,16 +195,16 @@ def status(scan_name, config):
     
     if not results:
         if scan_name:
-            click.echo(f"No status found for scan '{scan_name}'")
+            logger.info(f"No status found for scan '{scan_name}'")
         else:
-            click.echo("No scan status found. Run a scan first.")
+            logger.info("No scan status found. Run a scan first.")
         return
     
     # Display results in a table format
-    click.echo("Scan Status:")
-    click.echo("-" * 80)
-    click.echo(f"{'Name':<20} {'Handle':<20} {'Last Read':<20} {'Last Run':<20}")
-    click.echo("-" * 80)
+    print("Scan Status:")
+    print("-" * 80)
+    print(f"{'Name':<20} {'Handle':<20} {'Last Read':<20} {'Last Run':<20}")
+    print("-" * 80)
     
     for row in results:
         scan_name, handle, last_read, last_run, updated = row
@@ -181,7 +212,98 @@ def status(scan_name, config):
         last_read_short = last_read[:19] if last_read else "Never"
         last_run_short = last_run[:19].replace(' ', 'T') if last_run else "Never"
         
-        click.echo(f"{scan_name:<20} {handle:<20} {last_read_short:<20} {last_run_short:<20}")
+        print(f"{scan_name:<20} {handle:<20} {last_read_short:<20} {last_run_short:<20}")
+
+@cli.command()
+@click.argument("scan_name")
+@click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
+@click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
+def reset(scan_name, config, log_level):
+    """Reset state for SCAN_NAME (removes from database)."""
+    # Setup logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format='%(message)s'
+    )
+    
+    cfg = load_config(config)
+    
+    # Get database path from config
+    storage_cfg = cfg.get("storage", {})
+    db_path = storage_cfg.get("database", "bluewatch.db")
+    
+    # Initialize database (creates if not exists, migrates if needed)
+    init_database(db_path)
+    
+    # Reset the scan state
+    success = reset_scan_state(db_path, scan_name)
+    
+    if success:
+        logger.info(f"Reset state for scan '{scan_name}'")
+    else:
+        logger.info(f"No state found for scan '{scan_name}' - nothing to reset")
+
+def fetch_posts_backwards(client, handle, last_read_timestamp, max_age_hours=24):
+    """Fetch posts backwards in time until we hit last_read_timestamp or max_age_hours."""
+    cutoff_time = (datetime.now() - timedelta(hours=max_age_hours)).isoformat() + "Z"
+    all_posts = []
+    cursor = None
+    api_calls = 0
+    
+    while True:
+        try:
+            # Fetch 100 posts at a time
+            if cursor:
+                resp = client.get_author_feed(actor=handle, limit=100, cursor=cursor)
+            else:
+                resp = client.get_author_feed(actor=handle, limit=100)
+            
+            api_calls += 1
+            items = resp.feed
+            
+            if not items:
+                break
+                
+            # Check each post in this batch
+            should_stop = False
+            for item in items:
+                rec = item.post.record
+                created = getattr(rec, "created_at", "")
+                
+                # Stop if we've reached our last read timestamp
+                if last_read_timestamp and created <= last_read_timestamp:
+                    should_stop = True
+                    break
+                    
+                # Stop if we've gone back too far
+                if created <= cutoff_time:
+                    should_stop = True
+                    break
+                    
+                all_posts.append(item)
+            
+            if should_stop:
+                break
+                
+            # Get cursor for next batch (pagination)
+            cursor = getattr(resp, 'cursor', None)
+            if not cursor:
+                break
+                
+            # Rate limiting: pause between API calls
+            if api_calls > 1:
+                logger.debug(f"Pausing 10 seconds between API calls...")
+                time.sleep(10)
+                
+        except Exception as e:
+            logger.error(f"Error fetching posts: {e}")
+            break
+    
+    # Sort posts chronologically (oldest first) for processing
+    all_posts.sort(key=lambda x: getattr(x.post.record, "created_at", ""))
+    
+    logger.debug(f"Fetched {len(all_posts)} posts across {api_calls} API calls")
+    return all_posts
 
 def run_scan(client, scan_config, db_path):
     """Run a single scan configuration."""
@@ -190,42 +312,26 @@ def run_scan(client, scan_config, db_path):
     pattern = scan_config.get("pattern")
     webhook_url = scan_config.get("webhook_url")
     shell_cmd = scan_config.get("shell")
-    limit = scan_config.get("limit", 10)
 
     # Validate required fields
     if not handle or not pattern:
-        click.echo(f"Skipping scan '{name}': missing handle or pattern")
+        logger.warning(f"Skipping scan '{name}': missing handle or pattern")
         return
     
     if not webhook_url and not shell_cmd:
-        click.echo(f"Skipping scan '{name}': must have webhook_url or shell")
+        logger.warning(f"Skipping scan '{name}': must have webhook_url or shell")
         return
 
-    click.echo(f"Running scan: {name}")
+    logger.info(f"Running scan: {name}")
 
     # Get last read timestamp for this scan
     last_read = get_last_read_timestamp(db_path, name)
-
-    try:
-        resp = client.get_author_feed(actor=handle, limit=limit)
-        items = resp.feed
-    except Exception as e:
-        click.echo(f"Error fetching timeline for {name}: {e}")
-        return
-
-    # Filter posts to only those newer than last read timestamp
-    if last_read:
-        filtered_items = []
-        for item in items:
-            rec = item.post.record
-            created = getattr(rec, "created_at", "")
-            if created > last_read:
-                filtered_items.append(item)
-        items = filtered_items
-        click.echo(f"Filtered to {len(items)} new posts since {last_read}")
+    
+    # Fetch posts backwards until we hit last_read or 24 hours ago
+    items = fetch_posts_backwards(client, handle, last_read)
 
     if not items:
-        click.echo(f"No new posts to scan for {name}")
+        logger.info(f"No new posts to scan for {name}")
         # Still update last_run_at even if no new posts
         update_scan_run_time(db_path, name)
         return
@@ -234,7 +340,7 @@ def run_scan(client, scan_config, db_path):
     try:
         regex = re.compile(pattern, re.IGNORECASE)
     except re.error as e:
-        click.echo(f"Invalid regex pattern for {name}: {e}")
+        logger.error(f"Invalid regex pattern for {name}: {e}")
         return
 
     # Scan posts for matches
@@ -251,18 +357,29 @@ def run_scan(client, scan_config, db_path):
             latest_timestamp = created
         
         if regex.search(text):
+            # Get post URI and convert to web URL
+            post_uri = item.post.uri
+            # Convert AT URI to web URL: at://did:plc:xyz/app.bsky.feed.post/abc -> https://bsky.app/profile/handle/post/abc
+            post_id = post_uri.split('/')[-1] if '/' in post_uri else ''
+            web_url = f"https://bsky.app/profile/{handle}/post/{post_id}"
+            
             match_data = {
                 "handle": handle,
                 "created_at": created,
                 "text": text,
-                "pattern": pattern
+                "pattern": pattern,
+                "uri": post_uri,
+                "url": web_url
             }
             matches_found.append(match_data)
-            click.echo(f"Match found in {name}: {created}  {text}")
+            logger.info(f"Match found in {name}: {created}  {text}")
 
     # Update scan state with latest timestamp
     if latest_timestamp:
         update_scan_state(db_path, name, handle, latest_timestamp)
+    else:
+        # Even if no posts, still update run time
+        update_scan_run_time(db_path, name)
 
     # Process matches
     if matches_found:
@@ -277,9 +394,9 @@ def run_scan(client, scan_config, db_path):
                 }
                 response = requests.post(webhook_url, json=payload, timeout=30)
                 response.raise_for_status()
-                click.echo(f"Webhook called successfully for {name}: {response.status_code}")
+                logger.info(f"Webhook called successfully for {name}: {response.status_code}")
             except requests.RequestException as e:
-                click.echo(f"Error calling webhook for {name}: {e}")
+                logger.error(f"Error calling webhook for {name}: {e}")
 
         # Execute shell command if configured
         if shell_cmd:
@@ -288,13 +405,15 @@ def run_scan(client, scan_config, db_path):
                     formatted_cmd = shell_cmd.format(**match)
                     result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0:
-                        click.echo(f"Shell command executed successfully for {name}")
+                        logger.info(f"Shell command executed successfully for {name}")
+                        if result.stdout.strip():
+                            logger.info(f"Output: {result.stdout.strip()}")
                     else:
-                        click.echo(f"Shell command failed for {name}: {result.stderr}")
+                        logger.error(f"Shell command failed for {name}: {result.stderr}")
                 except Exception as e:
-                    click.echo(f"Error executing shell command for {name}: {e}")
+                    logger.error(f"Error executing shell command for {name}: {e}")
     else:
-        click.echo(f"No matches found for {name}")
+        logger.info(f"No matches found for {name}")
 
 if __name__ == "__main__":
     cli()

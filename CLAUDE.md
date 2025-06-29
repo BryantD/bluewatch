@@ -6,14 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Running the Application
 ```bash
-# View a user's timeline
-uv run ./bluewatch.py timeline example_user --limit 5
-
 # Run all configured scans
 uv run ./bluewatch.py scan
 
 # Run specific scan by name
 uv run ./bluewatch.py scan crypto_watch
+
+# With logging levels
+uv run ./bluewatch.py scan --log-level debug    # Verbose output
+uv run ./bluewatch.py scan --log-level warning  # Quiet (warnings/errors only)
+uv run ./bluewatch.py scan --log-level error    # Silent (errors only)
+
+# View scan status
+uv run ./bluewatch.py status
+uv run ./bluewatch.py status crypto_watch
+
+# Reset scan state
+uv run ./bluewatch.py reset crypto_watch
 
 # With custom config file
 uv run ./bluewatch.py scan --config /path/to/config.toml
@@ -50,8 +59,9 @@ This is a single-file Python CLI application (`bluewatch.py`) that uses PEP 723 
 
 **CLI Framework**: Uses Click for command-line interface
 - Main command group: `cli()`
-- Timeline command: `timeline()` - Fetches and displays user timelines
 - Scan command: `scan()` - Runs configured pattern monitoring
+- Status command: `status()` - Shows scan state and timestamps
+- Reset command: `reset()` - Clears scan state from database
 - Configuration loading: `load_config()` - Loads TOML config files
 
 **Bluesky Integration**: Uses AT Protocol client
@@ -60,9 +70,11 @@ This is a single-file Python CLI application (`bluewatch.py`) that uses PEP 723 
 - Error handling for network and API failures
 
 **Scan System**: Pattern-based timeline monitoring
+- Backward scanning: fetches all posts since last scan (up to 24 hours)
+- Pagination with 100 posts per API call and 10-second rate limiting
 - Regex pattern matching (case-insensitive)
 - Multiple scan configurations via `[[scan]]` TOML blocks
-- Webhook notifications with JSON payloads
+- Webhook notifications with JSON payloads including post URIs/URLs
 - Shell command execution with string formatting
 - Validation requiring webhook_url or shell (or both)
 
@@ -79,7 +91,6 @@ Each `[[scan]]` block supports:
 - `pattern` - Regex pattern for matching
 - `webhook_url` - HTTP endpoint (optional)
 - `shell` - Shell command with formatting (optional)
-- `limit` - Posts to scan (default: 10)
 
 ### String Formatting in Shell Commands
 Available formatting fields:
@@ -87,21 +98,29 @@ Available formatting fields:
 - `{created_at}` - Post timestamp
 - `{handle}` - User handle
 - `{pattern}` - Regex pattern
+- `{uri}` - AT Protocol URI of the post
+- `{url}` - Web-accessible URL to the post
 
 ### Webhook Payload Format
 ```json
 {
   "scan_name": "scan_identifier",
-  "matches": [{"handle": "...", "created_at": "...", "text": "...", "pattern": "..."}],
+  "matches": [{"handle": "...", "created_at": "...", "text": "...", "pattern": "...", "uri": "...", "url": "..."}],
   "total_matches": 1,
   "scanned_posts": 10
 }
 ```
 
+### Logging Levels
+- `--log-level debug` - Detailed output (API calls, post counts)
+- `--log-level info` - Normal operation (default)
+- `--log-level warning` - Warnings and errors only
+- `--log-level error` - Errors only
+
 ### Versioning
 - Uses semantic versioning via `__version__` variable in `bluewatch.py`
 - Version must be updated when making changes before committing
-- Current version: 0.3.0
+- Current version: 1.0.0
 
 ### Error Handling
 - Configuration file validation
@@ -121,3 +140,5 @@ Available formatting fields:
 - Credentials stored externally in config.toml (not tracked in git)
 - Shell commands executed with 30-second timeout
 - Webhook requests have 30-second timeout
+- Uses Python's standard logging module for output control
+- Backward scanning prevents duplicate notifications and missing posts

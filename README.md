@@ -25,22 +25,16 @@ name = "crypto_watch"
 handle = "example_user"
 pattern = "bitcoin|crypto"
 webhook_url = "https://your-webhook.com/endpoint"
-limit = 10
 
 [[scan]]
 name = "news_alerts"
 handle = "news_account"
 pattern = "breaking|urgent"
 shell = "notify-send 'News Alert' '{text}'"
-limit = 20
 ```
 
 ## Usage
 
-### View a user's timeline
-```bash
-uv run ./bluewatch.py timeline example_user --limit 5
-```
 
 ### Run configured scans
 ```bash
@@ -49,6 +43,18 @@ uv run ./bluewatch.py scan
 
 # Run a specific scan by name
 uv run ./bluewatch.py scan crypto_watch
+
+# With logging levels
+uv run ./bluewatch.py scan --log-level debug    # Verbose output
+uv run ./bluewatch.py scan --log-level warning  # Quiet (warnings/errors only)
+uv run ./bluewatch.py scan --log-level error    # Silent (errors only)
+
+# View scan status and history
+uv run ./bluewatch.py status
+uv run ./bluewatch.py status crypto_watch
+
+# Reset scan state (start fresh)
+uv run ./bluewatch.py reset crypto_watch
 ```
 
 ### Configuration Options
@@ -60,9 +66,10 @@ Each `[[scan]]` block supports:
 - `pattern` - Regular expression pattern (case-insensitive)
 - `webhook_url` - HTTP endpoint to call when matches found (optional)
 - `shell` - Shell command to execute when matches found (optional)
-- `limit` - Number of recent posts to scan (default: 10)
 
 **Note**: Each scan must have either `webhook_url` or `shell` (or both).
+
+Scans automatically fetch all posts since the last scan (up to 24 hours ago) to avoid missing content.
 
 #### String Formatting in Shell Commands
 Shell commands support string formatting with these fields:
@@ -70,6 +77,8 @@ Shell commands support string formatting with these fields:
 - `{created_at}` - Post creation timestamp
 - `{handle}` - User handle that posted
 - `{pattern}` - The regex pattern that matched
+- `{uri}` - AT Protocol URI of the post
+- `{url}` - Web-accessible URL to the post
 
 Example:
 ```toml
@@ -86,7 +95,9 @@ When a webhook is triggered, it receives a JSON payload:
       "handle": "example_user",
       "created_at": "2024-01-01T12:00:00Z",
       "text": "Bitcoin is rising!",
-      "pattern": "bitcoin|crypto"
+      "pattern": "bitcoin|crypto",
+      "uri": "at://did:plc:xyz123/app.bsky.feed.post/abc456",
+      "url": "https://bsky.app/profile/example_user/post/abc456"
     }
   ],
   "total_matches": 1,

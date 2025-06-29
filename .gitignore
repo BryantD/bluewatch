@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+# Config file
+config.toml
+
+# uv lock file
+uv.lock
+
+# Virtual environments
+.venv/
+
+# OS files
+.DS_Store
