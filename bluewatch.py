@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -258,7 +258,8 @@ def reset(scan_name, config, log_level):
 @click.argument("post_url")
 @click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
 @click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
-def test(scan_name, post_url, config, log_level):
+@click.option("--execute", is_flag=True, help="Execute webhook/shell commands if pattern matches")
+def test(scan_name, post_url, config, log_level, execute):
     """Test pattern matching against a specific post URL."""
     # Setup logging
     logging.basicConfig(
@@ -284,6 +285,9 @@ def test(scan_name, post_url, config, log_level):
         raise click.UsageError(f"Scan '{scan_name}' not found in config file")
 
     pattern = scan_config.get("pattern")
+    webhook_url = scan_config.get("webhook_url")
+    shell_cmd = scan_config.get("shell")
+
     if not pattern:
         logger.error(f"No pattern defined for scan '{scan_name}'")
         raise click.UsageError(f"No pattern defined for scan '{scan_name}'")
@@ -345,6 +349,54 @@ def test(scan_name, post_url, config, log_level):
             logger.info(f"\n✓ MATCH FOUND!")
             logger.info(f"  Matched: '{match.group()}'")
             logger.info(f"  Position: {match.start()}-{match.end()}")
+
+            # Execute notifications if --execute flag is set
+            if execute:
+                # Construct match data
+                post_uri = f"at://{did}/app.bsky.feed.post/{post_id}"
+                web_url = f"https://bsky.app/profile/{handle}/post/{post_id}"
+
+                match_data = {
+                    "handle": handle,
+                    "created_at": created,
+                    "text": text,
+                    "pattern": pattern,
+                    "uri": post_uri,
+                    "url": web_url
+                }
+
+                # Call webhook if configured
+                if webhook_url:
+                    try:
+                        payload = {
+                            "scan_name": scan_name,
+                            "matches": [match_data],
+                            "total_matches": 1,
+                            "scanned_posts": 1
+                        }
+                        response = requests.post(webhook_url, json=payload, timeout=30)
+                        response.raise_for_status()
+                        logger.info(f"\n✓ Webhook called successfully: {response.status_code}")
+                    except requests.RequestException as e:
+                        logger.error(f"\n✗ Error calling webhook: {e}")
+
+                # Execute shell command if configured
+                if shell_cmd:
+                    try:
+                        formatted_cmd = shell_cmd.format(**match_data)
+                        logger.info(f"\nExecuting: {formatted_cmd}")
+                        result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                        if result.returncode == 0:
+                            logger.info(f"✓ Shell command executed successfully")
+                            if result.stdout.strip():
+                                logger.info(f"Output: {result.stdout.strip()}")
+                        else:
+                            logger.error(f"✗ Shell command failed: {result.stderr}")
+                    except Exception as e:
+                        logger.error(f"✗ Error executing shell command: {e}")
+
+                if not webhook_url and not shell_cmd:
+                    logger.info(f"\nNo webhook or shell command configured for this scan")
         else:
             logger.info(f"\n✗ NO MATCH")
             logger.info(f"  The pattern '{pattern}' does not match the post text")
