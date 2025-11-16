@@ -32,3 +32,16 @@ pattern = "critical|emergency"
 # You can use both webhook and shell commands
 webhook_url = "https://alerts.com/webhook"
 shell = "echo '[{created_at}] {handle}: {text}' >> /var/log/alerts.log"
+
+[[scan]]
+name = "email_notifications"
+handle = "monitored_user"
+pattern = "poll|vote|survey"
+# Multiline shell command example using heredoc for email notifications
+shell = """
+/usr/bin/mail -s 'Bluewatch Alert' your-email@example.com <<EOF
+{url}
+
+{text}
+EOF
+"""

@@ -11,12 +11,16 @@ import subprocess
 import sqlite3
 import time
 import logging
+import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Suppress Pydantic warnings from atproto library
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -56,6 +60,7 @@ def init_database(db_path: str):
 
 def get_last_read_timestamp(db_path: str, scan_name: str) -> str | None:
     """Get the last read timestamp for a scan."""
+    db_path = Path(db_path).expanduser()
     conn = sqlite3.connect(db_path)
     cursor = conn.execute(
         "SELECT last_read_timestamp FROM scan_state WHERE scan_name = ?",
@@ -67,6 +72,7 @@ def get_last_read_timestamp(db_path: str, scan_name: str) -> str | None:
 
 def update_scan_state(db_path: str, scan_name: str, handle: str, timestamp: str):
     """Update the last read timestamp and run time for a scan."""
+    db_path = Path(db_path).expanduser()
     conn = sqlite3.connect(db_path)
     conn.execute("""
         INSERT OR REPLACE INTO scan_state (scan_name, handle, last_read_timestamp, last_run_at, updated_at)
@@ -77,6 +83,7 @@ def update_scan_state(db_path: str, scan_name: str, handle: str, timestamp: str)
 
 def update_scan_run_time(db_path: str, scan_name: str):
     """Update only the last run time for a scan."""
+    db_path = Path(db_path).expanduser()
     conn = sqlite3.connect(db_path)
     conn.execute("""
         UPDATE scan_state 
@@ -88,6 +95,7 @@ def update_scan_run_time(db_path: str, scan_name: str):
 
 def get_scan_status(db_path: str, scan_name: str = None):
     """Get status information for scans."""
+    db_path = Path(db_path).expanduser()
     conn = sqlite3.connect(db_path)
     
     if scan_name:
@@ -107,6 +115,7 @@ def get_scan_status(db_path: str, scan_name: str = None):
 
 def reset_scan_state(db_path: str, scan_name: str):
     """Remove scan state from database entirely."""
+    db_path = Path(db_path).expanduser()
     conn = sqlite3.connect(db_path)
     cursor = conn.execute("DELETE FROM scan_state WHERE scan_name = ?", (scan_name,))
     rows_affected = cursor.rowcount
