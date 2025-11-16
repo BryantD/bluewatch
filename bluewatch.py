@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -133,7 +133,8 @@ def cli():
 @click.argument("scan_name", required=False)
 @click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
 @click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
-def scan(scan_name, config, log_level):
+@click.option("--lookback-hours", type=int, default=24, help="Hours to look back for posts (default: 24)")
+def scan(scan_name, config, log_level, lookback_hours):
     """Run configured scans. If SCAN_NAME is provided, run only that scan."""
     # Setup logging
     logging.basicConfig(
@@ -176,7 +177,7 @@ def scan(scan_name, config, log_level):
     client.login(login=username, password=password)
 
     for scan_config in scans:
-        run_scan(client, scan_config, db_path)
+        run_scan(client, scan_config, db_path, lookback_hours)
 
 @cli.command()
 @click.argument("scan_name", required=False)
@@ -252,6 +253,106 @@ def reset(scan_name, config, log_level):
     else:
         logger.info(f"No state found for scan '{scan_name}' - nothing to reset")
 
+@cli.command()
+@click.argument("scan_name")
+@click.argument("post_url")
+@click.option("--config", "-c", default="config.toml", type=click.Path(), help="Path to config file")
+@click.option("--log-level", type=click.Choice(['debug', 'info', 'warning', 'error']), default='info', help="Set logging level (default: info)")
+def test(scan_name, post_url, config, log_level):
+    """Test pattern matching against a specific post URL."""
+    # Setup logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format='%(message)s'
+    )
+
+    cfg = load_config(config)
+    bs_cfg = cfg.get("bluesky", {})
+    username = bs_cfg.get("username")
+    password = bs_cfg.get("password")
+
+    if not username or not password:
+        logger.error("Bluesky credentials missing in config file")
+        raise click.UsageError("Bluesky credentials missing in config file")
+
+    # Find the scan configuration
+    scans = cfg.get("scan", [])
+    scan_config = next((s for s in scans if s.get("name") == scan_name), None)
+
+    if not scan_config:
+        logger.error(f"Scan '{scan_name}' not found in config file")
+        raise click.UsageError(f"Scan '{scan_name}' not found in config file")
+
+    pattern = scan_config.get("pattern")
+    if not pattern:
+        logger.error(f"No pattern defined for scan '{scan_name}'")
+        raise click.UsageError(f"No pattern defined for scan '{scan_name}'")
+
+    # Parse post URL to extract handle and post ID
+    # Format: https://bsky.app/profile/HANDLE/post/POST_ID
+    import urllib.parse
+    parsed = urllib.parse.urlparse(post_url)
+    path_parts = parsed.path.strip('/').split('/')
+
+    if len(path_parts) < 4 or path_parts[0] != 'profile' or path_parts[2] != 'post':
+        logger.error("Invalid post URL format. Expected: https://bsky.app/profile/HANDLE/post/POST_ID")
+        raise click.UsageError("Invalid post URL format")
+
+    handle = path_parts[1]
+    post_id = path_parts[3]
+
+    logger.info(f"Testing pattern '{pattern}' against post {post_id} from {handle}")
+
+    try:
+        from atproto import Client
+    except ImportError:
+        logger.error("The atproto library is required. Install via `uv add atproto`.")
+        raise click.ClickException("The atproto library is required")
+
+    client = Client()
+    client.login(login=username, password=password)
+
+    # Fetch the specific post
+    try:
+        # Get the user's DID first
+        profile = client.get_profile(actor=handle)
+        did = profile.did
+
+        # Construct AT URI: at://DID/app.bsky.feed.post/POST_ID
+        post_uri = f"at://{did}/app.bsky.feed.post/{post_id}"
+
+        # Fetch the post
+        from atproto import models
+        post_response = client.get_posts(uris=[post_uri])
+
+        if not post_response.posts:
+            logger.error(f"Post not found: {post_url}")
+            return
+
+        post = post_response.posts[0]
+        text = getattr(post.record, "text", "")
+        created = getattr(post.record, "created_at", "")
+
+        logger.info(f"\nPost text ({created}):")
+        logger.info(f"  {text}")
+        logger.info(f"\nPattern: {pattern}")
+
+        # Test the pattern
+        regex = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        match = regex.search(text)
+
+        if match:
+            logger.info(f"\n✓ MATCH FOUND!")
+            logger.info(f"  Matched: '{match.group()}'")
+            logger.info(f"  Position: {match.start()}-{match.end()}")
+        else:
+            logger.info(f"\n✗ NO MATCH")
+            logger.info(f"  The pattern '{pattern}' does not match the post text")
+
+    except Exception as e:
+        logger.error(f"Error fetching post: {e}")
+        raise click.ClickException(str(e))
+
 def fetch_posts_backwards(client, handle, last_read_timestamp, max_age_hours=24):
     """Fetch posts backwards in time until we hit last_read_timestamp or max_age_hours."""
     cutoff_time = (datetime.now() - timedelta(hours=max_age_hours)).isoformat() + "Z"
@@ -314,7 +415,7 @@ def fetch_posts_backwards(client, handle, last_read_timestamp, max_age_hours=24)
     logger.debug(f"Fetched {len(all_posts)} posts across {api_calls} API calls")
     return all_posts
 
-def run_scan(client, scan_config, db_path):
+def run_scan(client, scan_config, db_path, max_age_hours=24):
     """Run a single scan configuration."""
     name = scan_config.get("name", "unnamed")
     handle = scan_config.get("handle")
@@ -335,9 +436,9 @@ def run_scan(client, scan_config, db_path):
 
     # Get last read timestamp for this scan
     last_read = get_last_read_timestamp(db_path, name)
-    
-    # Fetch posts backwards until we hit last_read or 24 hours ago
-    items = fetch_posts_backwards(client, handle, last_read)
+
+    # Fetch posts backwards until we hit last_read or max_age_hours ago
+    items = fetch_posts_backwards(client, handle, last_read, max_age_hours)
 
     if not items:
         logger.info(f"No new posts to scan for {name}")
@@ -347,7 +448,7 @@ def run_scan(client, scan_config, db_path):
 
     # Compile regex pattern
     try:
-        regex = re.compile(pattern, re.IGNORECASE)
+        regex = re.compile(pattern, re.IGNORECASE | re.DOTALL)
     except re.error as e:
         logger.error(f"Invalid regex pattern for {name}: {e}")
         return
@@ -360,11 +461,13 @@ def run_scan(client, scan_config, db_path):
         rec = item.post.record
         text = getattr(rec, "text", "")
         created = getattr(rec, "created_at", "")
-        
+
+        logger.debug(f"Scanning post [{created}]: {text[:100]}...")
+
         # Track the latest timestamp
         if not latest_timestamp or created > latest_timestamp:
             latest_timestamp = created
-        
+
         if regex.search(text):
             # Get post URI and convert to web URL
             post_uri = item.post.uri
