@@ -49,6 +49,10 @@ uv run ./bluewatch.py scan --log-level debug    # Verbose output
 uv run ./bluewatch.py scan --log-level warning  # Quiet (warnings/errors only)
 uv run ./bluewatch.py scan --log-level error    # Silent (errors only)
 
+# Test a scan configuration against a specific post
+uv run ./bluewatch.py test crypto_watch https://bsky.app/profile/user.bsky.social/post/abc123
+uv run ./bluewatch.py test crypto_watch POST_URL --execute  # Actually trigger webhook/shell if match found
+
 # View scan status and history
 uv run ./bluewatch.py status
 uv run ./bluewatch.py status crypto_watch
