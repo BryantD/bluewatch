@@ -101,6 +101,8 @@ Available formatting fields:
 - `{uri}` - AT Protocol URI of the post
 - `{url}` - Web-accessible URL to the post
 
+**Important**: All values are automatically escaped using `shlex.quote()` for security. Do not manually quote placeholder fields (write `{text}` not `"{text}"`). Shell features in the template (variables, pipes, redirects) work normally.
+
 ### Webhook Payload Format
 ```json
 {
@@ -120,7 +122,7 @@ Available formatting fields:
 ### Versioning
 - Uses semantic versioning via `__version__` variable in `bluewatch.py`
 - Version must be updated when making changes before committing
-- Current version: 1.0.0
+- Current version: 1.2.1
 
 ### Error Handling
 - Configuration file validation

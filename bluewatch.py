@@ -12,6 +12,7 @@ import sqlite3
 import time
 import logging
 import warnings
+import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -20,7 +21,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -383,7 +384,9 @@ def test(scan_name, post_url, config, log_level, execute):
                 # Execute shell command if configured
                 if shell_cmd:
                     try:
-                        formatted_cmd = shell_cmd.format(**match_data)
+                        # Escape all values for safe shell substitution
+                        escaped_data = {k: shlex.quote(str(v)) for k, v in match_data.items()}
+                        formatted_cmd = shell_cmd.format(**escaped_data)
                         logger.info(f"\nExecuting: {formatted_cmd}")
                         result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
                         if result.returncode == 0:
@@ -566,7 +569,9 @@ def run_scan(client, scan_config, db_path, max_age_hours=24):
         if shell_cmd:
             for match in matches_found:
                 try:
-                    formatted_cmd = shell_cmd.format(**match)
+                    # Escape all values for safe shell substitution
+                    escaped_data = {k: shlex.quote(str(v)) for k, v in match.items()}
+                    formatted_cmd = shell_cmd.format(**escaped_data)
                     result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0:
                         logger.info(f"Shell command executed successfully for {name}")

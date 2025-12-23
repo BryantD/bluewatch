@@ -84,6 +84,8 @@ Shell commands support string formatting with these fields:
 - `{uri}` - AT Protocol URI of the post
 - `{url}` - Web-accessible URL to the post
 
+**Security**: All substituted values are automatically escaped using `shlex.quote()` to prevent shell injection and handle special characters safely. You don't need to manually quote the placeholder fields - just write `{text}` not `"{text}"`. Shell features like variables (`$VAR`), pipes (`|`), and redirects (`>`) in your command template work normally.
+
 Example:
 ```toml
 shell = "echo '[{created_at}] Alert from {handle}: {text}' >> alerts.log"
