@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -288,6 +288,7 @@ def test(scan_name, post_url, config, log_level, execute):
     pattern = scan_config.get("pattern")
     webhook_url = scan_config.get("webhook_url")
     shell_cmd = scan_config.get("shell")
+    shell_executable = scan_config.get("shell_executable")
 
     if not pattern:
         logger.error(f"No pattern defined for scan '{scan_name}'")
@@ -388,7 +389,15 @@ def test(scan_name, post_url, config, log_level, execute):
                         escaped_data = {k: shlex.quote(str(v)) for k, v in match_data.items()}
                         formatted_cmd = shell_cmd.format(**escaped_data)
                         logger.info(f"\nExecuting: {formatted_cmd}")
-                        result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                        run_kwargs = {
+                            "shell": True,
+                            "capture_output": True,
+                            "text": True,
+                            "timeout": 30
+                        }
+                        if shell_executable:
+                            run_kwargs["executable"] = shell_executable
+                        result = subprocess.run(formatted_cmd, **run_kwargs)
                         if result.returncode == 0:
                             logger.info(f"✓ Shell command executed successfully")
                             if result.stdout.strip():
@@ -477,6 +486,7 @@ def run_scan(client, scan_config, db_path, max_age_hours=24):
     pattern = scan_config.get("pattern")
     webhook_url = scan_config.get("webhook_url")
     shell_cmd = scan_config.get("shell")
+    shell_executable = scan_config.get("shell_executable")
 
     # Validate required fields
     if not handle or not pattern:
@@ -572,7 +582,15 @@ def run_scan(client, scan_config, db_path, max_age_hours=24):
                     # Escape all values for safe shell substitution
                     escaped_data = {k: shlex.quote(str(v)) for k, v in match.items()}
                     formatted_cmd = shell_cmd.format(**escaped_data)
-                    result = subprocess.run(formatted_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    run_kwargs = {
+                        "shell": True,
+                        "capture_output": True,
+                        "text": True,
+                        "timeout": 30
+                    }
+                    if shell_executable:
+                        run_kwargs["executable"] = shell_executable
+                    result = subprocess.run(formatted_cmd, **run_kwargs)
                     if result.returncode == 0:
                         logger.info(f"Shell command executed successfully for {name}")
                         if result.stdout.strip():

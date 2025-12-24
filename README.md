@@ -70,6 +70,7 @@ Each `[[scan]]` block supports:
 - `pattern` - Regular expression pattern (case-insensitive)
 - `webhook_url` - HTTP endpoint to call when matches found (optional)
 - `shell` - Shell command to execute when matches found (optional)
+- `shell_executable` - Path to shell executable (optional, defaults to `/bin/sh`)
 
 **Note**: Each scan must have either `webhook_url` or `shell` (or both).
 
@@ -89,6 +90,21 @@ Shell commands support string formatting with these fields:
 Example:
 ```toml
 shell = "echo '[{created_at}] Alert from {handle}: {text}' >> alerts.log"
+```
+
+To use bash-specific features like `$RANDOM`, specify the shell executable:
+```toml
+[[scan]]
+name = "example"
+handle = "user.bsky.social"
+pattern = "important"
+shell_executable = "/bin/bash"
+shell = """
+TMP=/tmp/alert.$RANDOM
+echo {text} > $TMP
+process-alert $TMP
+rm $TMP
+"""
 ```
 
 #### Webhook Payload

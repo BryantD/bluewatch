@@ -91,6 +91,7 @@ Each `[[scan]]` block supports:
 - `pattern` - Regex pattern for matching
 - `webhook_url` - HTTP endpoint (optional)
 - `shell` - Shell command with formatting (optional)
+- `shell_executable` - Path to shell executable (optional, defaults to `/bin/sh`)
 
 ### String Formatting in Shell Commands
 Available formatting fields:
@@ -102,6 +103,8 @@ Available formatting fields:
 - `{url}` - Web-accessible URL to the post
 
 **Important**: All values are automatically escaped using `shlex.quote()` for security. Do not manually quote placeholder fields (write `{text}` not `"{text}"`). Shell features in the template (variables, pipes, redirects) work normally.
+
+**Shell Selection**: By default, commands execute with `/bin/sh`. To use bash-specific features like `$RANDOM`, set `shell_executable = "/bin/bash"` in the scan configuration.
 
 ### Webhook Payload Format
 ```json
@@ -122,7 +125,7 @@ Available formatting fields:
 ### Versioning
 - Uses semantic versioning via `__version__` variable in `bluewatch.py`
 - Version must be updated when making changes before committing
-- Current version: 1.2.1
+- Current version: 1.3.0
 
 ### Error Handling
 - Configuration file validation
