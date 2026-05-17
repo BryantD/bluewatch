@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["click", "atproto", "requests"]
+# dependencies = ["click", "atproto", "requests", "curl-cffi"]
 # ///
 import click
 import tomllib
@@ -19,9 +19,14 @@ from pathlib import Path
 # Suppress Pydantic warnings from atproto library
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
+# === TLS-fingerprint workaround (remove when MarshalX/atproto is fixed) ===
+# See bluewatch_tls_shim.py for context and removal steps.
+from bluewatch_tls_shim import make_client  # noqa: E402
+# === end workaround ======================================================
+
 logger = logging.getLogger(__name__)
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()
@@ -169,12 +174,12 @@ def scan(scan_name, config, log_level, lookback_hours):
             raise click.UsageError(f"Scan '{scan_name}' not found in config file")
 
     try:
-        from atproto import Client
+        from atproto import Client  # noqa: F401  # availability check; remove `noqa` when shim is removed
     except ImportError:
         logger.error("The atproto library is required. Install via `uv add atproto`.")
         raise click.ClickException("The atproto library is required. Install via `uv add atproto`.")
     
-    client = Client()
+    client = make_client()  # TLS shim; restore to Client() when upstream fixed
     client.login(login=username, password=password)
 
     for scan_config in scans:
@@ -310,12 +315,12 @@ def test(scan_name, post_url, config, log_level, execute):
     logger.info(f"Testing pattern '{pattern}' against post {post_id} from {handle}")
 
     try:
-        from atproto import Client
+        from atproto import Client  # noqa: F401  # availability check; remove `noqa` when shim is removed
     except ImportError:
         logger.error("The atproto library is required. Install via `uv add atproto`.")
         raise click.ClickException("The atproto library is required")
 
-    client = Client()
+    client = make_client()  # TLS shim; restore to Client() when upstream fixed
     client.login(login=username, password=password)
 
     # Fetch the specific post
