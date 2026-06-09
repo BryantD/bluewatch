@@ -26,7 +26,7 @@ from bluewatch_tls_shim import make_client  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 def load_config(path: str):
     config_path = Path(path).expanduser()

@@ -125,7 +125,7 @@ Available formatting fields:
 ### Versioning
 - Uses semantic versioning via `__version__` variable in `bluewatch.py`
 - Version must be updated when making changes before committing
-- Current version: 1.3.0
+- Current version: 1.3.2
 
 ### Error Handling
 - Configuration file validation
