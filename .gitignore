@@ -3,12 +3,17 @@ __pycache__/
 
 # Config file
 config.toml
+config-web.toml
 
 # uv lock file
 uv.lock
 
 # Virtual environments
 .venv/
+bluewatch.egg-info/
 
 # OS files
 .DS_Store
+
+# database
+bluewatch.db
