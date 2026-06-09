@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "bluewatch",
+  "project_id": "01d95534-b534-43c4-89ca-e14ca01e8de9"
+}
